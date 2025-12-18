@@ -1,0 +1,75 @@
+name: build-fping
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential autoconf automake libtool pkg-config \
+            libcap-dev libcap2-bin
+
+      - name: Autotools bootstrap (needed when building from git)
+        run: |
+          ./autogen.sh
+
+      - name: Configure
+        run: |
+          ./configure --prefix=/usr
+
+      - name: Build
+        run: |
+          make -j"$(nproc)"
+          ./src/fping -v || true
+
+      - name: Run tests (optional)
+        run: |
+          make check || true
+
+      - name: Stage install into dist/
+        run: |
+          rm -rf dist
+          make DESTDIR="$PWD/dist" install
+          ls -lah dist/usr/sbin dist/usr/bin || true
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          # fping install path may be /usr/sbin or /usr/bin depending on configure
+          FPING_PATH="$(find dist -type f -name fping -perm -111 | head -n 1)"
+          if [ -z "${FPING_PATH:-}" ]; then
+            echo "fping binary not found in dist/"
+            exit 1
+          fi
+          cp -av "$FPING_PATH" out/fping
+          strip out/fping || true
+          sha256sum out/fping > out/fping.sha256
+          tar -C out -czf "fping-${GITHUB_REF_NAME}-linux-x86_64.tar.gz" fping fping.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fping-${{ github.ref_name }}-linux-x86_64
+          path: fping-${{ github.ref_name }}-linux-x86_64.tar.gz
+
+      - name: Publish GitHub Release (only on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            fping-${{ github.ref_name }}-linux-x86_64.tar.gz
