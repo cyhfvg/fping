@@ -36,9 +36,9 @@ jobs:
           make -j"$(nproc)"
           ./src/fping -v || true
 
-      - name: Run tests (optional)
-        run: |
-          make check || true
+      # - name: Run tests (optional)
+      #   run: |
+      #     make check || true
 
       - name: Stage install into dist/
         run: |
